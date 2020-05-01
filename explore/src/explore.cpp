@@ -59,19 +59,22 @@ Explore::Explore()
   , last_markers_count_(0)
 {
   double timeout;
-  double min_frontier_size;
+  double min_frontier_size, max_frontier_size;
   private_nh_.param("planner_frequency", planner_frequency_, 1.0);
   private_nh_.param("progress_timeout", timeout, 30.0);
   progress_timeout_ = ros::Duration(timeout);
   private_nh_.param("visualize", visualize_, false);
   private_nh_.param("potential_scale", potential_scale_, 1e-3);
   private_nh_.param("orientation_scale", orientation_scale_, 0.0);
+  private_nh_.param("origin_scale", origin_scale_, 0.0);
   private_nh_.param("gain_scale", gain_scale_, 1.0);
   private_nh_.param("min_frontier_size", min_frontier_size, 0.5);
+  private_nh_.param("max_frontier_size", max_frontier_size, 100.0);
+  private_nh_.param("min_goal_distance", min_goal_distance_, 0.0);
 
   search_ = frontier_exploration::FrontierSearch(costmap_client_.getCostmap(),
-                                                 potential_scale_, gain_scale_,
-                                                 min_frontier_size);
+                                                 potential_scale_, gain_scale_, origin_scale_,
+                                                 min_frontier_size, max_frontier_size);
 
   if (visualize_) {
     marker_array_publisher_ =
@@ -181,7 +184,7 @@ void Explore::makePlan()
   // find frontiers
   auto pose = costmap_client_.getRobotPose();
   // get frontiers sorted according to cost
-  auto frontiers = search_.searchFrom(pose.position);
+  auto frontiers = search_.searchFrom(pose.position, origin_);
   ROS_DEBUG("found %lu frontiers", frontiers.size());
   for (size_t i = 0; i < frontiers.size(); ++i) {
     ROS_DEBUG("frontier %zd cost: %f", i, frontiers[i].cost);
@@ -199,10 +202,10 @@ void Explore::makePlan()
 
   // find non blacklisted frontier
   auto frontier =
-      std::find_if_not(frontiers.begin(), frontiers.end(),
-                       [this](const frontier_exploration::Frontier& f) {
-                         return goalOnBlacklist(f.centroid);
-                       });
+      std::find_if(frontiers.begin(), frontiers.end(),
+                   [this](const frontier_exploration::Frontier& f) {
+                     return !goalOnBlacklist(f.centroid) && !goalTooClose(f.centroid);
+                   });
   if (frontier == frontiers.end()) {
     stop();
     return;
@@ -261,6 +264,13 @@ bool Explore::goalOnBlacklist(const geometry_msgs::Point& goal)
   return false;
 }
 
+bool Explore::goalTooClose(const geometry_msgs::Point& goal) {
+  const auto robot_position = costmap_client_.getRobotPose().position;
+  const auto distance = pow(goal.x - robot_position.x, 2.0) +
+                        pow(goal.y - robot_position.y, 2.0);
+  return distance < min_goal_distance_;
+}
+
 void Explore::reachedGoal(const actionlib::SimpleClientGoalState& status,
                           const move_base_msgs::MoveBaseResultConstPtr&,
                           const geometry_msgs::Point& frontier_goal)
@@ -282,6 +292,7 @@ void Explore::reachedGoal(const actionlib::SimpleClientGoalState& status,
 
 void Explore::start()
 {
+  origin_ = costmap_client_.getRobotPose().position;
   exploring_timer_.start();
 }
 

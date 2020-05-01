@@ -84,6 +84,7 @@ private:
                    const geometry_msgs::Point& frontier_goal);
 
   bool goalOnBlacklist(const geometry_msgs::Point& goal);
+  bool goalTooClose(const geometry_msgs::Point& goal);
 
   ros::NodeHandle private_nh_;
   ros::NodeHandle relative_nh_;
@@ -103,11 +104,14 @@ private:
   ros::Time last_progress_;
   size_t last_markers_count_;
 
+  geometry_msgs::Point origin_;
+
   // parameters
   double planner_frequency_;
-  double potential_scale_, orientation_scale_, gain_scale_;
+  double potential_scale_, orientation_scale_, gain_scale_, origin_scale_;
   ros::Duration progress_timeout_;
   bool visualize_;
+  double min_goal_distance_;
 };
 }
 

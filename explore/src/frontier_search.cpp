@@ -15,16 +15,18 @@ using costmap_2d::NO_INFORMATION;
 using costmap_2d::FREE_SPACE;
 
 FrontierSearch::FrontierSearch(costmap_2d::Costmap2D* costmap,
-                               double potential_scale, double gain_scale,
-                               double min_frontier_size)
+                               double potential_scale, double gain_scale, double origin_scale,
+                               double min_frontier_size, double max_frontier_size)
   : costmap_(costmap)
   , potential_scale_(potential_scale)
   , gain_scale_(gain_scale)
+  , origin_scale_(origin_scale)
   , min_frontier_size_(min_frontier_size)
+  , max_frontier_size_(max_frontier_size)
 {
 }
 
-std::vector<Frontier> FrontierSearch::searchFrom(geometry_msgs::Point position)
+std::vector<Frontier> FrontierSearch::searchFrom(geometry_msgs::Point position, geometry_msgs::Point origin)
 {
   std::vector<Frontier> frontier_list;
 
@@ -74,7 +76,7 @@ std::vector<Frontier> FrontierSearch::searchFrom(geometry_msgs::Point position)
         // neighbour)
       } else if (isNewFrontierCell(nbr, frontier_flag)) {
         frontier_flag[nbr] = true;
-        Frontier new_frontier = buildNewFrontier(nbr, pos, frontier_flag);
+        Frontier new_frontier = buildNewFrontier(nbr, pos, origin, frontier_flag);
         if (new_frontier.size * costmap_->getResolution() >=
             min_frontier_size_) {
           frontier_list.push_back(new_frontier);
@@ -96,6 +98,7 @@ std::vector<Frontier> FrontierSearch::searchFrom(geometry_msgs::Point position)
 
 Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
                                           unsigned int reference,
+                                          geometry_msgs::Point origin,
                                           std::vector<bool>& frontier_flag)
 {
   // initialize frontier structure
@@ -124,10 +127,13 @@ Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
     unsigned int idx = bfs.front();
     bfs.pop();
 
+    const int max_frontier_cells = max_frontier_size_ / costmap_->getResolution();
+    int num_cells = 0;
     // try adding cells in 8-connected neighborhood to frontier
     for (unsigned int nbr : nhood8(idx, *costmap_)) {
       // check if neighbour is a potential frontier cell
       if (isNewFrontierCell(nbr, frontier_flag)) {
+        if (++num_cells > max_frontier_cells) break;
         // mark cell as frontier
         frontier_flag[nbr] = true;
         unsigned int mx, my;
@@ -166,6 +172,8 @@ Frontier FrontierSearch::buildNewFrontier(unsigned int initial_cell,
   // average out frontier centroid
   output.centroid.x /= output.size;
   output.centroid.y /= output.size;
+  output.origin_distance = sqrt(pow(origin.x - output.centroid.x, 2) +
+                                pow(origin.y - output.centroid.y, 2));
   return output;
 }
 
@@ -190,8 +198,9 @@ bool FrontierSearch::isNewFrontierCell(unsigned int idx,
 
 double FrontierSearch::frontierCost(const Frontier& frontier)
 {
-  return (potential_scale_ * frontier.min_distance *
-          costmap_->getResolution()) -
-         (gain_scale_ * frontier.size * costmap_->getResolution());
+  // I think min_distance is already in world coordinates, so this is a bug
+  return potential_scale_ * frontier.min_distance * costmap_->getResolution()
+       - origin_scale_ * frontier.origin_distance * costmap_->getResolution()
+       - gain_scale_ * frontier.size * costmap_->getResolution();
 }
 }
